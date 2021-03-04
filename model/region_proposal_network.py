@@ -2,7 +2,7 @@ import numpy as np
 from torch.nn import functional as F
 import torch as t
 from torch import nn
-
+import torch
 from model.utils.bbox_tools import generate_anchor_base
 from model.utils.creator_tool import ProposalCreator
 
@@ -58,6 +58,7 @@ class RegionProposalNetwork(nn.Module):
         normal_init(self.conv1, 0, 0.01)
         normal_init(self.score, 0, 0.01)
         normal_init(self.loc, 0, 0.01)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def forward(self, x, img_size, scale=1.):
         """Forward Region Proposal Network.

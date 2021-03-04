@@ -11,7 +11,7 @@ from torch import nn
 from data.dataset import preprocess
 from torch.nn import functional as F
 from utils.config import opt
-
+import torch
 
 def nograd(f):
     def new_f(*args,**kwargs):
@@ -81,6 +81,9 @@ class FasterRCNN(nn.Module):
         self.loc_normalize_mean = loc_normalize_mean
         self.loc_normalize_std = loc_normalize_std
         self.use_preset('evaluate')
+        self.cuda = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = True if t.cuda.is_available() else False
+
 
     @property
     def n_class(self):
@@ -151,12 +154,10 @@ class FasterRCNN(nn.Module):
                 preset to use.
 
         """
-        if preset == 'visualize':
+
+        if preset == 'evaluate':
             self.nms_thresh = 0.3
             self.score_thresh = 0.7
-        elif preset == 'evaluate':
-            self.nms_thresh = 0.3
-            self.score_thresh = 0.05
         else:
             raise ValueError('preset must be visualize or evaluate')
 
@@ -184,7 +185,7 @@ class FasterRCNN(nn.Module):
         return bbox, label, score
 
     @nograd
-    def predict(self, imgs,sizes=None,visualize=False):
+    def predict(self, imgs,sizes=None):
         """Detect objects from images.
 
         This method predicts objects for each image.
@@ -213,34 +214,30 @@ class FasterRCNN(nn.Module):
 
         """
         self.eval()
-        if visualize:
-            self.use_preset('visualize')
-            prepared_imgs = list()
-            sizes = list()
-            for img in imgs:
-                size = img.shape[1:]
-                img = preprocess(at.tonumpy(img))
-                prepared_imgs.append(img)
-                sizes.append(size)
-        else:
-             prepared_imgs = imgs 
+        prepared_imgs = list()
+        sizes = list()
+        for img in imgs:
+            size = img.shape[1:]
+            img = preprocess(at.tonumpy(img))
+            prepared_imgs.append(img)
+            sizes.append(size)
         bboxes = list()
         labels = list()
         scores = list()
         for img, size in zip(prepared_imgs, sizes):
-            img = at.totensor(img[None]).float()
+            img = at.totensor(img[None], cuda=self.device).float()
             scale = img.shape[3] / size[1]
             roi_cls_loc, roi_scores, rois, _ = self(img, scale=scale)
             # We are assuming that batch size is 1.
             roi_score = roi_scores.data
             roi_cls_loc = roi_cls_loc.data
-            roi = at.totensor(rois) / scale
+            roi = at.totensor(rois, cuda=self.device) / scale
 
             # Convert predictions to bounding boxes in image coordinates.
             # Bounding boxes are scaled to the scale of the input images.
-            mean = t.Tensor(self.loc_normalize_mean).cuda(). \
+            mean = t.Tensor(self.loc_normalize_mean).to(self.cuda). \
                 repeat(self.n_class)[None]
-            std = t.Tensor(self.loc_normalize_std).cuda(). \
+            std = t.Tensor(self.loc_normalize_std).to(self.cuda). \
                 repeat(self.n_class)[None]
 
             roi_cls_loc = (roi_cls_loc * std + mean)
@@ -248,13 +245,13 @@ class FasterRCNN(nn.Module):
             roi = roi.view(-1, 1, 4).expand_as(roi_cls_loc)
             cls_bbox = loc2bbox(at.tonumpy(roi).reshape((-1, 4)),
                                 at.tonumpy(roi_cls_loc).reshape((-1, 4)))
-            cls_bbox = at.totensor(cls_bbox)
+            cls_bbox = at.totensor(cls_bbox, cuda=self.device)
             cls_bbox = cls_bbox.view(-1, self.n_class * 4)
             # clip bounding box
             cls_bbox[:, 0::2] = (cls_bbox[:, 0::2]).clamp(min=0, max=size[0])
             cls_bbox[:, 1::2] = (cls_bbox[:, 1::2]).clamp(min=0, max=size[1])
 
-            prob = (F.softmax(at.totensor(roi_score), dim=1))
+            prob = (F.softmax(at.totensor(roi_score, cuda=self.device), dim=1))
 
             bbox, label, score = self._suppress(cls_bbox, prob)
             bboxes.append(bbox)

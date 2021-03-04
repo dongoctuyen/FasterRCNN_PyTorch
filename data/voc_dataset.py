@@ -80,7 +80,7 @@ class VOCBboxDataset:
         self.data_dir = data_dir
         self.use_difficult = use_difficult
         self.return_difficult = return_difficult
-        self.label_names = VOC_BBOX_LABEL_NAMES
+        self.label_names = VQC
 
     def __len__(self):
         return len(self.ids)
@@ -117,15 +117,19 @@ class VOCBboxDataset:
                 int(bndbox_anno.find(tag).text) - 1
                 for tag in ('ymin', 'xmin', 'ymax', 'xmax')])
             name = obj.find('name').text.lower().strip()
-            label.append(VOC_BBOX_LABEL_NAMES.index(name))
+            label.append(VQC.index(name))
         bbox = np.stack(bbox).astype(np.float32)
         label = np.stack(label).astype(np.int32)
         # When `use_difficult==False`, all elements in `difficult` are False.
         difficult = np.array(difficult, dtype=np.bool).astype(np.uint8)  # PyTorch don't support np.bool
 
         # Load a image
-        img_file = os.path.join(self.data_dir, 'JPEGImages', id_ + '.jpg')
-        img = read_image(img_file, color=True)
+        try:
+            img_file = os.path.join(self.data_dir, 'JPEGImages', id_ + '.jpg')
+            img = read_image(img_file, color=True)
+        except:
+            img_file = os.path.join(self.data_dir, 'JPEGImages', id_ + '.JPG')
+            img = read_image(img_file, color=True)
 
         # if self.return_difficult:
         #     return img, bbox, label, difficult
@@ -155,3 +159,4 @@ VOC_BBOX_LABEL_NAMES = (
     'sofa',
     'train',
     'tvmonitor')
+VQC = ('vqc', )

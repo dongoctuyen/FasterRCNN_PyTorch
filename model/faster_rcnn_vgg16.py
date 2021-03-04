@@ -83,6 +83,7 @@ class FasterRCNNVGG16(FasterRCNN):
             head,
         )
 
+import torch
 
 class VGG16RoIHead(nn.Module):
     """Faster R-CNN Head for VGG-16 based implementation.
@@ -114,6 +115,8 @@ class VGG16RoIHead(nn.Module):
         self.roi_size = roi_size
         self.spatial_scale = spatial_scale
         self.roi = RoIPool( (self.roi_size, self.roi_size),self.spatial_scale)
+        self.device = True if t.cuda.is_available() else False
+
 
     def forward(self, x, rois, roi_indices):
         """Forward the chain.
@@ -133,8 +136,8 @@ class VGG16RoIHead(nn.Module):
 
         """
         # in case roi_indices is  ndarray
-        roi_indices = at.totensor(roi_indices).float()
-        rois = at.totensor(rois).float()
+        roi_indices = at.totensor(roi_indices, cuda=self.device).float()
+        rois = at.totensor(rois, cuda=self.device).float()
         indices_and_rois = t.cat([roi_indices[:, None], rois], dim=1)
         # NOTE: important: yx->xy
         xy_indices_and_rois = indices_and_rois[:, [0, 2, 1, 4, 3]]

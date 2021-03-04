@@ -7,7 +7,7 @@ from pprint import pprint
 
 class Config:
     # data
-    voc_data_dir = '/dataset/PASCAL2007/VOC2007/'
+    voc_data_dir = 'C:/Users/dntuy/OneDrive/Documents/workspace/computervision/dataset/VQC/'
     min_size = 600  # image resize
     max_size = 1000 # image resize
     num_workers = 8
@@ -34,16 +34,16 @@ class Config:
     pretrained_model = 'vgg16'
 
     # training
-    epoch = 14
+    epoch = 100
 
 
-    use_adam = False # Use Adam optimizer
+    use_adam = True # Use Adam optimizer
     use_chainer = False # try match everything as chainer
     use_drop = False # use dropout in RoIHead
     # debug
     debug_file = '/tmp/debugf'
 
-    test_num = 10000
+    test_num = 100
     # model
     load_path = None
 

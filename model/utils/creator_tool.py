@@ -343,6 +343,8 @@ class ProposalCreator:
         self.n_test_pre_nms = n_test_pre_nms
         self.n_test_post_nms = n_test_post_nms
         self.min_size = min_size
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
     def __call__(self, loc, score,
                  anchor, img_size, scale=1.):
@@ -422,8 +424,8 @@ class ProposalCreator:
         # unNOTE: somthing is wrong here!
         # TODO: remove cuda.to_gpu
         keep = nms(
-            torch.from_numpy(roi).cuda(),
-            torch.from_numpy(score).cuda(),
+            torch.from_numpy(roi).to(self.device),
+            torch.from_numpy(score).to(self.device),
             self.nms_thresh)
         if n_post_nms > 0:
             keep = keep[:n_post_nms]

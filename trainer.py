@@ -8,7 +8,6 @@ from model.utils.creator_tool import AnchorTargetCreator, ProposalTargetCreator
 from torch import nn
 import torch as t
 from utils import array_tool as at
-from utils.vis_tool import Visualizer
 
 from utils.config import opt
 from torchnet.meter import ConfusionMeter, AverageValueMeter
@@ -54,13 +53,14 @@ class FasterRCNNTrainer(nn.Module):
         self.loc_normalize_std = faster_rcnn.loc_normalize_std
 
         self.optimizer = self.faster_rcnn.get_optimizer()
-        # visdom wrapper
-        self.vis = Visualizer(env=opt.env)
 
         # indicators for training status
         self.rpn_cm = ConfusionMeter(2)
         self.roi_cm = ConfusionMeter(21)
         self.meters = {k: AverageValueMeter() for k in LossTuple._fields}  # average loss
+        self.device = True if t.cuda.is_available() else False
+        self.cuda = t.device('cuda' if t.cuda.is_available() else 'cpu')
+
 
     def forward(self, imgs, bboxes, labels, scale):
         """Forward Faster R-CNN and calculate losses.
@@ -127,16 +127,16 @@ class FasterRCNNTrainer(nn.Module):
             at.tonumpy(bbox),
             anchor,
             img_size)
-        gt_rpn_label = at.totensor(gt_rpn_label).long()
-        gt_rpn_loc = at.totensor(gt_rpn_loc)
+        gt_rpn_label = at.totensor(gt_rpn_label, cuda=self.device).long()
+        gt_rpn_loc = at.totensor(gt_rpn_loc, cuda=self.device)
         rpn_loc_loss = _fast_rcnn_loc_loss(
             rpn_loc,
             gt_rpn_loc,
             gt_rpn_label.data,
-            self.rpn_sigma)
+            self.rpn_sigma, cuda=self.device)
 
         # NOTE: default value of ignore_index is -100 ...
-        rpn_cls_loss = F.cross_entropy(rpn_score, gt_rpn_label.cuda(), ignore_index=-1)
+        rpn_cls_loss = F.cross_entropy(rpn_score, gt_rpn_label, ignore_index=-1)
         _gt_rpn_label = gt_rpn_label[gt_rpn_label > -1]
         _rpn_score = at.tonumpy(rpn_score)[at.tonumpy(gt_rpn_label) > -1]
         self.rpn_cm.add(at.totensor(_rpn_score, False), _gt_rpn_label.data.long())
@@ -144,18 +144,18 @@ class FasterRCNNTrainer(nn.Module):
         # ------------------ ROI losses (fast rcnn loss) -------------------#
         n_sample = roi_cls_loc.shape[0]
         roi_cls_loc = roi_cls_loc.view(n_sample, -1, 4)
-        roi_loc = roi_cls_loc[t.arange(0, n_sample).long().cuda(), \
-                              at.totensor(gt_roi_label).long()]
-        gt_roi_label = at.totensor(gt_roi_label).long()
-        gt_roi_loc = at.totensor(gt_roi_loc)
+        roi_loc = roi_cls_loc[t.arange(0, n_sample).long().to(self.cuda) , \
+                              at.totensor(gt_roi_label, cuda=self.device).long()]
+        gt_roi_label = at.totensor(gt_roi_label, cuda=self.device).long()
+        gt_roi_loc = at.totensor(gt_roi_loc, cuda=self.device)
 
         roi_loc_loss = _fast_rcnn_loc_loss(
             roi_loc.contiguous(),
             gt_roi_loc,
             gt_roi_label.data,
-            self.roi_sigma)
+            self.roi_sigma, cuda=self.device)
 
-        roi_cls_loss = nn.CrossEntropyLoss()(roi_score, gt_roi_label.cuda())
+        roi_cls_loss = nn.CrossEntropyLoss()(roi_score, gt_roi_label.to(self.cuda))
 
         self.roi_cm.add(at.totensor(roi_score, False), gt_roi_label.data.long())
 
@@ -189,7 +189,6 @@ class FasterRCNNTrainer(nn.Module):
         save_dict['model'] = self.faster_rcnn.state_dict()
         save_dict['config'] = opt._state_dict()
         save_dict['other_info'] = kwargs
-        save_dict['vis_info'] = self.vis.state_dict()
 
         if save_optimizer:
             save_dict['optimizer'] = self.optimizer.state_dict()
@@ -205,11 +204,10 @@ class FasterRCNNTrainer(nn.Module):
             os.makedirs(save_dir)
 
         t.save(save_dict, save_path)
-        self.vis.save([self.vis.env])
         return save_path
 
-    def load(self, path, load_optimizer=True, parse_opt=False, ):
-        state_dict = t.load(path)
+    def load(self, path, load_optimizer=True, parse_opt=False, map_location='cpu'):
+        state_dict = t.load(path, map_location=map_location)
         if 'model' in state_dict:
             self.faster_rcnn.load_state_dict(state_dict['model'])
         else:  # legacy way, for backward compatibility
@@ -246,12 +244,19 @@ def _smooth_l1_loss(x, t, in_weight, sigma):
     return y.sum()
 
 
-def _fast_rcnn_loc_loss(pred_loc, gt_loc, gt_label, sigma):
-    in_weight = t.zeros(gt_loc.shape).cuda()
+def _fast_rcnn_loc_loss(pred_loc, gt_loc, gt_label, sigma, cuda=True):
+    if cuda:
+        in_weight = t.zeros(gt_loc.shape).cuda()
+    else:
+        in_weight = t.zeros(gt_loc.shape)
+
     # Localization loss is calculated only for positive rois.
     # NOTE:  unlike origin implementation, 
     # we don't need inside_weight and outside_weight, they can calculate by gt_label
-    in_weight[(gt_label > 0).view(-1, 1).expand_as(in_weight).cuda()] = 1
+    if cuda:
+        in_weight[(gt_label > 0).view(-1, 1).expand_as(in_weight).cuda()] = 1
+    else:
+        in_weight[(gt_label > 0).view(-1, 1).expand_as(in_weight)] = 1
     loc_loss = _smooth_l1_loss(pred_loc, gt_loc, in_weight.detach(), sigma)
     # Normalize by total number of negtive and positive rois.
     loc_loss /= ((gt_label >= 0).sum().float()) # ignore gt_label==-1 for rpn_loss
